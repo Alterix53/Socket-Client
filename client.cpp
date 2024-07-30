@@ -1,9 +1,11 @@
-
-#include "FileDownload.h"
-#include <chrono>
+#include <time.h>
 #include <thread>
 using namespace std;
-using namespace std::chrono;
+#include "afxsock.h"
+// #include <unistd.h>
+#include <cstdlib>
+#include <signal.h>
+#include "FileDownload.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -17,7 +19,7 @@ void signal_callback_handler(int signum) {
 	if (!isDownloading)
 	{
 		cout << "Caught signal Ctrl + C, exit the program..." << endl;
-		
+
 		// close the program
 		exit(signum);
 	}
@@ -28,7 +30,8 @@ void signal_callback_handler(int signum) {
 CWinApp theApp;
 
 int main(int argc, TCHAR* argv[], TCHAR* envp[]) {
-
+	hideCursor();
+	HANDLE hConsoleOutput = GetStdHandle(STD_OUTPUT_HANDLE);
 	int nRetCode = 0;
 
 	HMODULE hModule = ::GetModuleHandle(NULL);
@@ -47,83 +50,85 @@ int main(int argc, TCHAR* argv[], TCHAR* envp[]) {
 			CSocket Client;
 
 			Client.Create();
-			Client.Connect(_T("127.0.0.1"), 4567);
+			Client.Connect(_T("127.0.0.1"), 45673);
 
-			// receive list of downable file from sever
-			vector<fileZip> downable;
+			// receive list of file from server
+			vector<fileZip> ServerFile;
 			int num_of_file;
 			Client.Receive(&num_of_file, sizeof(int), 0);
-
+			int coordY = num_of_file + 2;
 			bool check = true;
 			fileZip temp;
 
 			for (int i = 0; i < num_of_file; i++) {
 
 				Client.Receive(&temp, sizeof(fileZip), 0);
-				downable.push_back(temp);
+				ServerFile.push_back(temp);
 				Client.Send(&check, sizeof(bool), 0);
 			}
 
-			for (int i = 0; i < downable.size(); i++) {
-				cout << downable[i].name << " " << downable[i].size << downable[i].sizeType << endl;
-			}
-
-			vector<fileZip> waiting;
 			// Register signal and signal handler
 			signal(SIGINT, signal_callback_handler);
+			printServerFile(ServerFile);
+
+			vector <fileZip> DownloadFile;
+
+			// before client input new file, read the file to later skip the previous files
 			int alreadyDownload = 0;
-			readInputFile("input.txt", waiting, alreadyDownload);
-			alreadyDownload = waiting.size();
+			readInputFile("input.txt", DownloadFile, alreadyDownload);
+			alreadyDownload = DownloadFile.size();
+			/*for (int i = 0; i < alreadyDownload; i++) {
+				cout << DownloadFile[i].name << endl;
+			}*/
 
 			do {
-				auto start = steady_clock::now();
-
 				fflush(stdin);
 				// read input file
-				waiting.clear(); // delete all the vector in the previous 
-				readInputFile("input.txt", waiting, alreadyDownload);
+				DownloadFile.clear(); // delete all the vector in the previous attempt
+				readInputFile("input.txt", DownloadFile, alreadyDownload);
 
-				for (int i = 0; i < waiting.size(); i++) {
-					int check = checkIfDownloaded(downable, waiting[i].name);
-					cout << check << endl;
-					// if file cannot downloaded
-					if (check == -1) {
-						GoToXY(0, num_of_file + 1);
-						cout << waiting[i].name << " is not downloadable!                     " << endl;
+				bool foundNew = false;
+				for (int i = 0; i < DownloadFile.size(); i++) {
+					foundNew = true;
+					int check = checkIfDownloaded(ServerFile, DownloadFile[i].name);
+					switch (check) {
+					case 0: { // not exist
+						GoToXY(0, coordY);
+						cout << DownloadFile[i].name << " is not available on server!                    " << endl;
+						break;
 					}
-
-					// if file is already downloaded
-					else if (check == 1) {
-						GoToXY(0, num_of_file + 1);
-						cout << waiting[i].name << " is downloaded!                           " << endl;
-						continue;
-					}
-
-					// if file is not downloaded
-					else if (check == 0) {
+					case 1: { // can be download
 						isDownloading = true;
-						string dFile = waiting[i].name;
+						string dFile = DownloadFile[i].name;
 						Client.Send(&dFile, sizeof(dFile), 0);
 
-						GoToXY(0, num_of_file + 1);
-						cout << dFile << " is downloading:";
+						GoToXY(0, coordY);
+						cout << dFile << " is downloading:    ";
 
-						downFile(Client, dFile);
+						downFile(Client, dFile, coordY);
+						isDownloading = false;
+						break;
 					}
+					case 2: {
+						GoToXY(0, coordY);
+						cout << DownloadFile[i].name << " is already downloaded!                           " << endl;
+						break;
+					}
+					}
+					coordY++;
+				}
+				if (foundNew) {
+
+					Sleep(3000);
+					system("cls");
+					printServerFile(ServerFile);
 				}
 
+				// reset cac bien
 				isDownloading = false;
-
-				alreadyDownload += waiting.size();
-
-				// get the end timer
-				auto end = steady_clock::now();
-				auto elapsed = duration_cast<milliseconds>(end - start).count();
-
-				int delay = 2000 - elapsed;
-				if (delay > 0) {
-					std::this_thread::sleep_for(milliseconds(delay));
-				}
+				alreadyDownload += DownloadFile.size();
+				coordY = num_of_file + 2;
+				Sleep(2);
 			} while (1);
 
 			Client.Close();

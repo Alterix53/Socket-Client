@@ -1,12 +1,14 @@
-#include <iostream>
-#include <fstream>
-#include <iomanip>
-#include <vector>
-#include <string>
-#include <sstream>
-#include <string>
+
 #include "FileDownload.h"
 using namespace std;
+
+void printServerFile(vector <fileZip> ServerFile) {
+	cout << "Current available files on server: " << endl;
+	for (int i = 0; i < ServerFile.size(); i++) {
+		cout << ServerFile[i].name << " " << ServerFile[i].size << ServerFile[i].sizeType << endl;
+	}
+	cout << "----------------------------------------------" << endl;
+}
 
 fileZip getFileInfo(string fileInfo) {
 
@@ -39,12 +41,12 @@ fileZip getFileInfo(string fileInfo) {
 
 // doc file input.txt de client, kiem tra cac tep them vao va tai ve tep moi
 void readInputFile(string filename, vector<fileZip>& file, int alreadyDownload) {
-	fstream ifs;
+	ifstream ifs;
 	ifs.open(filename);
 
 	// exit 1: khong the mo file
 	if (!ifs) {
-		cerr << "Can not open the file!" << filename << "!" << endl;
+		cerr << "Can not open the file " << filename << "!" << endl;
 		exit(1);
 	}
 
@@ -55,7 +57,7 @@ void readInputFile(string filename, vector<fileZip>& file, int alreadyDownload) 
 	}
 
 	// lay cac file moi
-	while (!ifs) {
+	while (!ifs.eof()) {
 		string s;
 		getline(ifs, s);
 
@@ -67,93 +69,89 @@ void readInputFile(string filename, vector<fileZip>& file, int alreadyDownload) 
 	ifs.close();
 }
 
-int checkIfDownloaded(vector<fileZip> downable, string filename) {
-	// return 1 if the file is already downloaded on the computer
-	// return 0 if the file 
-	// return -1 if the file is not exist on server's list file
+int checkIfDownloaded(vector<fileZip> ServerFile, string filename) {
+	// 0: can't download (not exist on server)
+	// 1: can be downloaded
+	// 2: file is already on client's pc
+	const string FilePath = "output/" + filename;
+	int isDownloadable = false;
 
-	int downloadable = false;
-
-	for (int i = 0; i < downable.size(); i++) {
-		if (filename != downable[i].name) {
+	for (int i = 0; i < ServerFile.size(); i++) {
+		if (filename != ServerFile[i].name) {
 			continue;
 		}
 
-		downloadable = true;
-		ifstream ifs;
+		// file did appear on server
+		isDownloadable = true;
 
 		// try to open the file. 
 		// The file is already on the client's computer if the file can be opened.
-		ifs.open(filename);
+		ifstream ifs;
+		ifs.open(FilePath);
 		if (ifs) {
 			ifs.close();
-			return 1;
+			return 2;
 		}
+		else
+			return 1;
 	}
 
-	if (downloadable)
-		return 0;
-
-	return -1;
+	return 0;
 }
 
 // print the percentage of the current download file
-void printPercent(long long size, long long currentSize, int length_file, int num_of_file) {
+void printPercent(long long size, long long currentSize, int coordY) {
 	double p = (currentSize / double(size)) * 100;
-	GoToXY(length_file + 20, num_of_file + 1);
-	cout << fixed << setprecision(2) << p << " %                              ";
-	Sleep(0.1f);
+	GoToXY(50, coordY);
+	cout << fixed << setprecision(2) << p << " %";
+	Sleep(0.5f);
 }
 
-// download each chunk in a file and write into destination file in append mode
-void downChunk(string filename, vector <char> data, int size) {
+// download each buffer in a file and write into destination file in append mode
+void DownloadBuffer(string filename, vector <char> data, int size) {
 	ofstream ofs;
 	ofs.open(filename, ios::out | ios::binary | ios::app);
 	if (!ofs) {
-		cout << "There are problems while downloading this file!" << endl;
+		cerr << "There are problems while isFinished this file!" << endl;
 		return;
 	}
 	ofs.write(data.data(), size);
 	ofs.close();
 }
 
-void downFile(CSocket& client, string filename) {
-	bool downloading = true;		// check if file is downloading or not
-	long long allSize;				// size of the downloading file
+void downFile(CSocket& client, string filename, int coordY) {
+	const string path = "output/" + filename;
+	long long allSize;				// size of the file
 
 	// server get the size of the file and send, client receive the data
 	client.Receive(&allSize, sizeof(allSize), 0);
 
-	int chunk_size; // size of one chunk
-	long long currentSize = 0; // hold the size of the data 
-	bool check;
-
-	while (downloading) {
-	save_point:
-		client.Receive(&chunk_size, sizeof(chunk_size), 0);
+	int bufferSize = 1024 * 128;						// size of one buffer
+	long long currentSize = 0;			// hold the size of the data 
+	// bool isDownloadCorrectly = true;
 
 
-		currentSize += long long(chunk_size);
+	bool isFinished = false;			// check if the file finish download or not
+	while (currentSize < allSize) {
+		// get the  buffer data from server
+		vector <char> buffer(bufferSize); 
+		int count = client.Receive(buffer.data(), bufferSize, 0);
+		currentSize += count;				// for printing percentage
 
-		vector<char> chunk(chunk_size); // buffer to save chunk data
-
-		client.Receive(chunk.data(), chunk_size, 0);
-
-		if (chunk.size() == chunk_size) {
-			downChunk(filename, chunk, chunk_size);
-			check = true;
-			client.Send(&check, sizeof(check), 0);
+		// check and download the file if the sending data is correct
+		if (buffer.size() > 0) {
+			DownloadBuffer(path, buffer, count);
 		}
 		else {
-			check = false;
-			client.Send(&check, sizeof(check), 0);
-			goto save_point;
+			break;
 		}
+		
+		printPercent(allSize, currentSize, coordY);
 
-		printPercent(allSize, currentSize, filename.length(), 8);
-
-		// server send signal if file is downloading or not
-		// download = false: the file finish 
-		client.Receive(&downloading, sizeof(downloading), 0);
+		// server send signal if file is finished or not
+		// isFinished = true: the file finish 
+		//client.Receive(&isFinished, sizeof(isFinished), 0);
 	}
+
+	cout << "  Download complete!" << endl;
 }

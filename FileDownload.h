@@ -5,7 +5,7 @@
 #include <vector>
 #include <string>
 #include <sstream>
-#include "ConsoleSetting.h"
+
 #include <stdio.h>
 #include <tchar.h>
 #include <afxsock.h>
@@ -54,21 +54,20 @@ using namespace std;
 #include <signal.h>
 
 
+#include "ConsoleSetting.h"
+
+
 struct fileZip {
 	string name;
 	int size;
 	string sizeType;
 };
 
+void printServerFile(vector <fileZip> file);
 fileZip getFileInfo(string s);
-// vector<fileZip> readFileDownable(string filename);
-
-void GoToXY(int posX, int posY);
-
 void readInputFile(string filename, vector<fileZip>& f, int alreadyDownload);
-int checkIfDownloaded(vector<fileZip> downable, string filename);
-void printPercent(long long size, long long currentSize, int length_file, int num_of_file);
-void downChunk(string filename, vector<char> data, int size);
-void downFile(CSocket& client, string filename);
+int checkIfDownloaded(vector<fileZip> ServerFile, string filename);
+void printPercent(long long size, long long currentSize, int coordY);
+void DownloadBuffer(string filename, vector<char> data, int size);
+void downFile(CSocket& client, string filename, int coordY);
 
-void signal_callback_handler(int signum);
